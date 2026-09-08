@@ -98,11 +98,28 @@ FORECAST_COLS = {
     "shortwave_radiation":   "fc_rad",
 }
 
+# Open-Meteo "previous day" forecast columns — the value that was actually
+# forecast about a day *before* the target hour (Open-Meteo's Previous Runs
+# API: `<var>_previous_day1` = the run available roughly 1 calendar day ahead
+# of the valid time). Unlike the un-suffixed columns above — which the
+# Previous-Runs-API backfills from the *most recent* model run once a date is
+# in the past, i.e. closer to the final analysis than to a real advance
+# forecast — these are honestly "known ahead of time" and safe to use as a
+# forecast feature for genuine multi-hour-ahead prediction.
+FORECAST_PREVDAY_COLS = {
+    "temperature_2m_previous_day1":       "fc_temp_prevday",
+    "relative_humidity_2m_previous_day1": "fc_hum_prevday",
+    "precipitation_previous_day1":        "fc_precip_prevday",
+    "wind_speed_10m_previous_day1":       "fc_viento_prevday",
+    "shortwave_radiation_previous_day1":  "fc_rad_prevday",
+}
+
 # Prefix groups, handy for feature selection in the notebooks
 CONTINUOUS_COLS = list(INTERIOR_CONTINUOUS.values())
 ACTUATOR_COLS = list(INTERIOR_ACTUATORS.values())
 EXTERIOR_COLS = list(EXTERIOR_RAW.values())
 FORECAST_FEATURE_COLS = list(FORECAST_COLS.values())
+FORECAST_PREVDAY_FEATURE_COLS = list(FORECAST_PREVDAY_COLS.values())
 
 # First hour at which *all* climatic systems (fog, shade screens, every roof and
 # side vent) are reporting. Before this the actuator columns are mostly zero
@@ -137,10 +154,16 @@ def _read_exterior(path: str, new_name: str) -> pd.Series:
 
 
 def _read_forecast(path: str) -> pd.DataFrame:
-    """Read the Open-Meteo forecast, shift -2h, keep/rename selected columns."""
+    """Read the Open-Meteo forecast, shift -2h, keep/rename selected columns.
+
+    Keeps both the "latest run" columns (`FORECAST_COLS`) and the
+    "previous_day1" columns (`FORECAST_PREVDAY_COLS`) — see the note above
+    `FORECAST_PREVDAY_COLS` for why the two are not interchangeable.
+    """
+    all_cols = {**FORECAST_COLS, **FORECAST_PREVDAY_COLS}
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"]) - pd.Timedelta(hours=2)
-    df = df.set_index("date")[list(FORECAST_COLS)].rename(columns=FORECAST_COLS)
+    df = df.set_index("date")[list(all_cols)].rename(columns=all_cols)
     df = df[~df.index.duplicated(keep="first")].sort_index()
     return df
 
@@ -201,8 +224,24 @@ def build_hourly_dataset(
     # actuators: absent report == off
     df[ACTUATOR_COLS] = df[ACTUATOR_COLS].fillna(0.0)
     # continuous interior + exterior + forecast: fill short gaps by time interp
-    cont = CONTINUOUS_COLS + EXTERIOR_COLS + FORECAST_FEATURE_COLS
+    cont = CONTINUOUS_COLS + EXTERIOR_COLS + FORECAST_FEATURE_COLS + FORECAST_PREVDAY_FEATURE_COLS
     df[cont] = df[cont].interpolate(method="time", limit=interpolate_limit)
+
+    # The `previous_day1` forecast has had at least one real multi-day outage
+    # in the archive (observed: `wind_speed_10m_previous_day1`, ~260 h in
+    # Apr-May 2026) that is far too long for `interpolate_limit` to bridge.
+    # Rather than lose those hours from every model (they would otherwise
+    # propagate into every horizon-shifted feature via
+    # `make_forecast_horizon_features` and force a big dropna), fall back to
+    # the "latest run" column for the same variable, which has no such gaps.
+    # This trades a little bit of the previous_day1 lead-time guarantee for
+    # keeping the row, only where the honest forecast is simply unavailable.
+    for prevday_col, base_col in zip(FORECAST_PREVDAY_FEATURE_COLS, FORECAST_FEATURE_COLS):
+        n_missing = df[prevday_col].isna().sum()
+        if n_missing:
+            print(f"note: {prevday_col} still missing {n_missing}h after interpolation; "
+                  f"backfilling from {base_col}")
+            df[prevday_col] = df[prevday_col].fillna(df[base_col])
 
     if add_time_features:
         import numpy as np
@@ -248,6 +287,33 @@ def add_actuator_history(df: pd.DataFrame, windows=(3, 6)) -> list[str]:
         for w in windows:
             name = f"{col}_r{w}"
             df[name] = df[col].rolling(window=w, min_periods=1).sum()
+            new_cols.append(name)
+    return new_cols
+
+
+def make_forecast_horizon_features(df: pd.DataFrame, horizons=(1, 6, 12),
+                                   source_cols=None) -> list[str]:
+    """Add, for each forecast variable and horizon, the forecast value that
+    applies to the *target* hour t+h — i.e. what was actually known about
+    that future hour's weather at prediction time.
+
+    Uses the `previous_day1` forecast columns by default (`source_cols`),
+    since those genuinely carry ~1-day lead time (see `FORECAST_PREVDAY_COLS`).
+    Built the same way as `make_targets()`: shift back by h so row t carries
+    the value forecast for t+h. Because the previous_day1 forecast for hour
+    t+h was itself issued about a day before t+h, it was already known at t
+    for every horizon used in this project (max 12h, well inside that ~1-day
+    lead time), so this introduces no leakage.
+
+    Modifies `df` in place and returns the list of new column names.
+    """
+    if source_cols is None:
+        source_cols = FORECAST_PREVDAY_FEATURE_COLS
+    new_cols = []
+    for col in source_cols:
+        for h in horizons:
+            name = f"{col}_h{h}"
+            df[name] = df[col].shift(-h)
             new_cols.append(name)
     return new_cols
 
