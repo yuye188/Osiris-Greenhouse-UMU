@@ -1,0 +1,11 @@
+sensor,longest_flat_min,frozen_from,frozen_value,dead
+temp_alta,23989,2026-08-22 09:10:00,27.9,True
+temp_centro,7,,,False
+temp_baja,23990,2026-08-22 09:09:00,27.5,True
+hum_alta,23995,2026-08-22 09:04:00,80.0,True
+hum_centro,266,,,False
+hum_baja,23992,2026-08-22 09:07:00,80.0,True
+co2,167,,,False
+dpv,268,,,False
+par,23989,2026-08-22 09:10:00,542.38,True
+rad,23990,2026-08-22 09:09:00,144.1,True

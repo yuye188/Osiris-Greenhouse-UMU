@@ -1,0 +1,18 @@
+group,file,n_rows,n_negative,codes
+LIGHTS,Luz_artificial_centro-este_0.csv,690,0,
+LIGHTS,Luz_artificial_centro-oeste_0.csv,690,0,
+LIGHTS,Luz_artificial_nor-este_0.csv,690,0,
+LIGHTS,Luz_artificial_nor-oeste_0.csv,690,0,
+LIGHTS,Luz_artificial_sur-este_0.csv,690,0,
+LIGHTS,Luz_artificial_sur-oeste_0.csv,690,0,
+FOG,Fog_0.csv,72625,36210,[-15]
+VENT_ROOF,Ventana_cenital_este_0.csv,51538,888,[-1]
+VENT_ROOF,Ventana_cenital_oeste_0.csv,51732,1083,[-1]
+VENT_SIDE,Ventana_lateral_norte_0.csv,49946,202,[-1]
+VENT_SIDE,Ventana_lateral_sur_0.csv,49948,208,"[-3, -1]"
+VENT_SIDE,Ventana_lateral_oeste_0.csv,49938,202,[-1]
+SHADE,Pantalla_de_sombreo_cenital_0.csv,29881,0,
+RECIRC,Recirculador_0.csv,270,0,
+RECIRC,Recirculador_centro_0.csv,402,0,
+RECIRC2,Calefactores_0.csv,270,0,
+RECIRC2,Calefactores_2.csv,403,3,[-2]

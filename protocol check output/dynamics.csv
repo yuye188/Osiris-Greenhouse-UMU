@@ -1,0 +1,19 @@
+trial,group,signal,onset,baseline,gain,trend_per_h,tau_min,r2,usable,note
+A2,VENT_ROOF,temp_centro,2026-08-04 10:04:00,39.81,-2.34,1.97,14.1,0.934,True,
+A2,VENT_ROOF,hum_centro,2026-08-04 10:04:00,23.69,2.81,-2.34,21.3,0.973,True,
+A3,VENT_ROOF,temp_centro,2026-08-04 17:20:00,47.65,-1.28,-2.61,2.1,0.891,True,
+A3,VENT_ROOF,hum_centro,2026-08-04 17:20:00,20.75,-60.0,13.33,270.0,0.578,False,"UNUSABLE: fit hit its bounds; tau > half the 4 h window, not identifiable; |gain| 60 implausible for one actuator"
+A4,VENT_SIDE,temp_centro,2026-08-05 06:04:00,24.9,-26.59,7.45,184.8,0.96,False,"UNUSABLE: tau > half the 4 h window, not identifiable; |gain| 27 implausible for one actuator"
+A4,VENT_SIDE,hum_centro,2026-08-05 06:04:00,74.8,60.0,-14.39,243.8,0.741,False,"UNUSABLE: fit hit its bounds; tau > half the 4 h window, not identifiable; |gain| 60 implausible for one actuator"
+A5,VENT_SIDE,temp_centro,2026-08-05 18:04:00,45.7,-6.08,-2.53,14.2,0.989,True,
+A5,VENT_SIDE,hum_centro,2026-08-05 18:04:00,28.04,3.22,8.36,7.3,0.952,True,
+A6,SHADE,temp_centro,2026-08-05 14:04:00,44.14,3.94,-0.08,30.1,0.864,True,
+A6,SHADE,hum_centro,2026-08-05 14:04:00,30.83,-29.07,4.23,196.1,0.934,False,"UNUSABLE: tau > half the 4 h window, not identifiable"
+A7,FOG,temp_centro,2026-08-06 06:00:00,25.89,-2.53,1.66,39.0,0.89,True,
+A7,FOG,hum_centro,2026-08-06 06:00:00,88.78,25.63,-2.92,114.8,0.99,True,
+A9,RECIRC,temp_centro,2026-08-06 08:03:00,26.49,-60.0,12.97,259.6,0.892,False,"UNUSABLE: fit hit its bounds; tau > half the 4 h window, not identifiable; |gain| 60 implausible for one actuator"
+A9,RECIRC,hum_centro,2026-08-06 08:03:00,100.0,60.0,-27.4,72.2,0.833,False,UNUSABLE: fit hit its bounds; |gain| 60 implausible for one actuator
+A10,RECIRC2,temp_centro,2026-08-07 08:03:00,25.84,47.77,1.07,600.0,0.988,False,"UNUSABLE: fit hit its bounds; tau > half the 4 h window, not identifiable; |gain| 48 implausible for one actuator"
+A10,RECIRC2,hum_centro,2026-08-07 08:03:00,94.76,-60.0,-7.61,222.4,0.986,False,"UNUSABLE: fit hit its bounds; tau > half the 4 h window, not identifiable; |gain| 60 implausible for one actuator"
+A11,LIGHTS,temp_centro,2026-08-07 18:03:00,48.01,-3.8,-2.26,18.0,0.925,True,
+A11,LIGHTS,hum_centro,2026-08-07 18:03:00,25.88,1.94,5.47,13.5,0.87,True,

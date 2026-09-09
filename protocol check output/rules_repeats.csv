@@ -1,0 +1,23 @@
+name,block,note,devices,all_zero,cells_ok,cells,exact,mismatches,guard_min_above,centro_min_above,centro_peak,blind
+B3,2026-09-04 00:00:00,Fallo,2.0,False,2.0,2.0,True,,,0.0,26.7,False
+B13,2026-09-04 03:00:00,18 min +50º,2.0,True,2.0,2.0,True,,,0.0,25.4,True
+B18,2026-09-04 06:00:00,Fallo,3.0,True,3.0,3.0,True,,,0.0,24.8,True
+B21,2026-09-04 09:00:00,19 min +50º,3.0,True,3.0,3.0,True,,,0.0,42.6,True
+B22,2026-09-04 12:00:00,Fallo,3.0,True,3.0,3.0,True,,,71.0,52.9,True
+B24,2026-09-04 15:00:00,Fallo,3.0,False,3.0,3.0,True,,,23.0,54.3,False
+B29,2026-09-04 18:00:00,9 min +50º,1.0,False,1.0,1.0,True,,,0.0,49.7,False
+A9,2026-09-04 21:00:00,(not in export),,,,,,,,,,
+B30,2026-09-05 03:00:00,15 min +50º,1.0,True,1.0,1.0,True,,,0.0,24.9,True
+B38,2026-09-05 06:00:00,15 min +50º,1.0,False,1.0,1.0,True,,,0.0,24.6,False
+B46,2026-09-05 09:00:00,29 min +50º,6.0,True,6.0,6.0,True,,,0.0,39.7,True
+B53,2026-09-05 12:00:00,28 min +50º,6.0,False,6.0,6.0,True,,,74.0,54.2,False
+B54,2026-09-05 15:00:00,41 min +50º,6.0,False,6.0,6.0,True,,,121.0,56.4,False
+C30,2026-09-05 18:00:00,60 min +50º,15.0,False,15.0,15.0,True,,,0.0,44.4,False
+A10,2026-09-05 21:00:00,(not in export),,,,,,,,,,
+D05,2026-09-06 03:00:00,17 min +50º,15.0,False,4.0,15.0,False,"luz artificial sur-oeste: want 10, got 0; luz artificial centro-oeste: want 10, got 0; luz artificial centro-este: want 10, got 0; luz artificial sur-este: want 10, got 0; luz artificial nor-este: want 10, got 0; luz artificial nor-oeste: want 10, got 0; ventana cenital oeste: want 100, got 0; ventana cenital este: want 100, got 0; pantalla de sombreo cenital: want 50, got 0; recirculador centro: want 1, got 0; calefactores: want 1, got 0",,0.0,23.3,False
+D06,2026-09-06 06:00:00,1 min +50º,15.0,False,11.0,15.0,False,"fog: want 10, got 0; ventana lateral norte: want 100, got 0; ventana lateral oeste: want 100, got 0; ventana lateral sur: want 100, got 0",,0.0,21.6,False
+D25,2026-09-06 09:00:00,Fallo,15.0,False,15.0,15.0,True,,,0.0,34.9,False
+D61,2026-09-06 12:00:00,Fallo,15.0,False,15.0,15.0,True,,,0.0,39.9,False
+D80,2026-09-06 15:00:00,Fallo,15.0,False,15.0,15.0,True,,,2.0,50.1,False
+D82,2026-09-06 18:00:00,Fallo,15.0,False,15.0,15.0,True,,,0.0,34.7,False
+D95,2026-09-06 21:00:00,Fallo,15.0,False,3.0,15.0,False,"luz artificial sur-oeste: want 4, got 0; luz artificial centro-oeste: want 4, got 0; luz artificial centro-este: want 4, got 0; luz artificial sur-este: want 4, got 0; luz artificial nor-este: want 4, got 0; luz artificial nor-oeste: want 4, got 0; fog: want 0, got no data; ventana cenital oeste: want 100, got 0; ventana cenital este: want 100, got 0; pantalla de sombreo cenital: want 50, got 0; recirculador centro: want 1, got 0; calefactores: want 1, got 0",,0.0,26.9,False

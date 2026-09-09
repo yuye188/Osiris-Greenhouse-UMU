@@ -1,0 +1,8 @@
+group,levels_available,levels_per_slot_min,levels_per_slot_max,var_explained_by_slot,r_with_block_parity,verdict
+LIGHTS,6,2,2,0.925,0.0,CONFOUNDED with time of day
+FOG,4,2,2,0.714,-0.845,CONFOUNDED with time of day
+VENT_ROOF,5,5,5,0.004,0.007,balanced
+VENT_SIDE,3,3,3,0.018,0.026,balanced
+SHADE,3,3,3,0.004,-0.013,balanced
+RECIRC,2,2,2,0.0,0.0,balanced
+RECIRC2,2,2,2,0.0,0.0,balanced
