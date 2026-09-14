@@ -385,6 +385,195 @@ def load_sensors(data_dir: Path = DATA_DIR, freq: str = "1min",
 
 
 # --------------------------------------------------------------------------- #
+# Exterior weather: on-site station + Open-Meteo forecast
+# --------------------------------------------------------------------------- #
+#
+# Two more decoding facts, established the same way as the three in the module
+# header (the checks are reproducible from the numbers quoted below):
+#
+# 4. **The station is UTC, the forecast file is already local.** The station
+#    CSVs in ``outside data/`` carry the same ``Z`` suffix as every other
+#    export, so they take the same ``+2 h`` shift. ``forecast data/
+#    hourly_weather_data.csv`` does **not**: correlating station temperature
+#    against ``temperature_2m`` peaks when the station is moved +2 h
+#    (r = 0.964) and not at +0 h (r = 0.780), i.e. the ``date`` column is
+#    already Murcia local time. Shifting it again would misalign it by 2 h.
+#
+# 5. **Open-Meteo's radiation and precipitation are preceding-hour
+#    aggregates.** ``shortwave_radiation`` labelled ``H`` is the mean over
+#    ``[H-1, H)``, while ``resample("1h")`` labels a bin by its *start*.
+#    Against station PAR the correlation is 0.976 with the forecast moved
+#    -1 h versus 0.930 unmoved, so the accumulated channels are re-labelled to
+#    the start of their hour here. Instantaneous channels (temperature,
+#    humidity, wind) are left on their own label.
+#
+# Note on the two forecast flavours: Open-Meteo's Previous-Runs API backfills
+# the un-suffixed columns from the *most recent* model run once a date is past,
+# so they are closer to an analysis than to a forecast. The
+# ``*_previous_day1`` columns are the run that was actually available about a
+# day ahead of the valid hour, and are the honest choice whenever the question
+# is "what could have been known in advance". Over this campaign the two differ
+# by MAE 0.50 C (temperature), 4.3 %RH, 0.41 m/s and 15.5 W/m2.
+
+#: Values at or below this are logger "no-data" sentinels (-999999), not
+#: readings; none of the exterior quantities can legitimately reach it.
+SENTINEL_FLOOR = -100.0
+
+#: On-site weather station (``outside data/``): file stem -> column name.
+#: ``Radiación_solar_global_0`` is deliberately absent — over the whole
+#: campaign it is 100 % sentinel (10932/10932 rows at -999999), a dead channel,
+#: exactly as in the year-long dataset used by ``greenhouse_dataset.py``.
+#: Exterior radiation therefore comes from the PAR sensor and from the
+#: forecast's shortwave. ``Precipitación_actual_0`` is byte-identical to
+#: ``Precipitación_0`` and is not read twice.
+OUTSIDE = {
+    "Temperatura_ambiente_0":  "ext_temp",
+    "Humedad_ambiente_0":      "ext_hum",
+    "Radiación_solar_par_0":   "ext_par",
+    "Velocidad_del_viento_0":  "ext_wind",
+}
+
+#: Physically possible range per exterior channel; anything outside is dropped.
+OUTSIDE_RANGE = {
+    "ext_temp": (-10.0, 60.0),
+    "ext_hum":  (0.0, 100.0),
+    "ext_par":  (0.0, 2000.0),
+    "ext_wind": (0.0, 60.0),
+}
+
+#: Rain gauge. Event-logged like everything else, but it only writes *while it
+#: is raining*, so an absent hour means dry, not missing.
+RAIN_FILE = "Precipitación_0.csv"
+
+FORECAST_FILE = Path("forecast data") / "hourly_weather_data.csv"
+
+#: Open-Meteo columns -> our names, split by label convention (see fact 5).
+FORECAST_INSTANT = {
+    "temperature_2m":       "fc_temp",
+    "relative_humidity_2m": "fc_hum",
+    "wind_speed_10m":       "fc_wind",
+}
+FORECAST_ACCUM = {
+    "precipitation":        "fc_precip",
+    "shortwave_radiation":  "fc_rad",
+}
+
+
+def load_outside(data_dir: Path = DATA_DIR, freq: str = "1h") -> pd.DataFrame:
+    """Weather-station channels on a regular **local-time** grid (mean per bin).
+
+    Sentinels and out-of-range samples become ``NaN`` before averaging, so a
+    dead sample never drags an hourly mean. Bins are labelled by their start.
+
+    The station logs every 5 min (wind every ~8 s), so a sub-hourly ``freq``
+    leaves most bins empty; those are filled by time interpolation over at most
+    15 min, the same convention :func:`load_sensors` uses. Real outages - wind
+    has 21 of them, the longest 110 min - stay ``NaN``.
+    """
+    cols = {}
+    for stem, name in OUTSIDE.items():
+        s = _read_events(data_dir / "outside data" / f"{stem}.csv")
+        lo, hi = OUTSIDE_RANGE[name]
+        s = s.where((s > SENTINEL_FLOOR) & (s >= lo) & (s <= hi))
+        cols[name] = s.resample(freq).mean()
+    df = pd.DataFrame(cols)
+    step = pd.Timedelta(freq)
+    if step < pd.Timedelta("1h"):
+        df = df.interpolate(limit=max(int(pd.Timedelta("15min") / step), 1),
+                            limit_area="inside")
+    return df
+
+
+def load_rain(data_dir: Path = DATA_DIR, freq: str = "1h") -> pd.Series:
+    """Rain-gauge reading per bin, local time; dry bins are ``0``, not ``NaN``.
+
+    The gauge logged only two episodes in the whole export (2026-08-01 evening,
+    i.e. two days before ``DAY1``, and 2026-09-01 midday, campaign day 30), so
+    for practically the entire campaign this is a constant zero and the
+    forecast's ``fc_precip`` is the more informative wet/dry indicator.
+    """
+    s = _read_events(data_dir / "outside data" / RAIN_FILE)
+    s = s.where(s > SENTINEL_FLOOR).resample(freq).max()
+    return s.rename("ext_rain")
+
+
+def load_forecast(data_dir: Path = DATA_DIR, prevday: bool = True) -> pd.DataFrame:
+    """Open-Meteo hourly forecast on the campaign's **local** hourly grid.
+
+    Accumulated channels are moved -1 h so every column is labelled by the
+    start of the hour it describes (fact 5). With ``prevday`` the honest
+    day-ahead run is returned as well, suffixed ``_prevday``.
+    """
+    raw = pd.read_csv(data_dir / FORECAST_FILE)
+    idx = pd.to_datetime(raw["date"])          # already local time (fact 4)
+    out = []
+    for src, dst in {**FORECAST_INSTANT, **FORECAST_ACCUM}.items():
+        shift = -1 if src in FORECAST_ACCUM else 0
+        pairs = [(src, dst)]
+        if prevday:
+            pairs.append((f"{src}_previous_day1", f"{dst}_prevday"))
+        for c, name in pairs:
+            s = pd.Series(pd.to_numeric(raw[c], errors="coerce").values, index=idx.values)
+            s.index = s.index + pd.Timedelta(hours=shift)
+            out.append(s.rename(name))
+    return pd.concat(out, axis=1).sort_index()
+
+
+def load_weather(data_dir: Path = DATA_DIR, freq: str = "1h",
+                 prevday: bool = True) -> pd.DataFrame:
+    """Station + forecast + rain on one local-time grid, ready to join on
+    ``load_sensors()`` / ``block_table()`` output.
+
+    Forecast columns are hourly by construction; at a sub-hourly ``freq`` they
+    are forward-filled within the hour rather than interpolated, so no value is
+    invented between two model hours.
+    """
+    ext = load_outside(data_dir, freq=freq).join(load_rain(data_dir, freq=freq))
+    ext["ext_rain"] = ext["ext_rain"].fillna(0.0)
+    fc = load_forecast(data_dir, prevday=prevday)
+    if pd.Timedelta(freq) < pd.Timedelta("1h"):
+        fc = fc.reindex(ext.index, method="ffill", limit=59)
+    return ext.join(fc, how="left")
+
+
+def weather_quality(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+    """Coverage, sentinels and gaps per exterior channel, plus the forecast.
+
+    The companion of :func:`data_quality` for everything outside the
+    greenhouse. ``bias_vs_forecast`` is station minus Open-Meteo on matched
+    local hours: it is a siting/calibration offset, not an error of either
+    source, and is worth knowing before the two are mixed in one model. It is
+    left ``NaN`` for PAR, which measures a different waveband than the
+    forecast's broadband shortwave and so has no meaningful difference (the two
+    track each other at r = 0.98, with PAR ~= 0.51 x shortwave over the
+    campaign).
+    """
+    rows = []
+    fc = load_forecast(data_dir, prevday=False)
+    pair = {"ext_temp": "fc_temp", "ext_hum": "fc_hum", "ext_wind": "fc_wind"}
+    for stem, name in {**OUTSIDE, "Radiación_solar_global_0": "ext_rad_global"}.items():
+        s = _read_events(data_dir / "outside data" / f"{stem}.csv")
+        n_sent = int((s <= SENTINEL_FLOOR).sum())
+        dt = s.index.to_series().diff().dt.total_seconds()
+        gaps = dt[dt > 1800]
+        bias = np.nan
+        if name in pair:
+            lo, hi = OUTSIDE_RANGE[name]
+            h = s.where((s > SENTINEL_FLOOR) & (s >= lo) & (s <= hi)).resample("1h").mean()
+            j = pd.concat([h.rename("a"), fc[pair[name]].rename("b")], axis=1).dropna()
+            bias = round(float((j.a - j.b).mean()), 2) if len(j) else np.nan
+        rows.append(dict(channel=name, n=len(s),
+                         start=s.index.min(), end=s.index.max(),
+                         median_dt_s=round(float(dt.median()), 1),
+                         n_sentinel=n_sent,
+                         pct_sentinel=round(100 * n_sent / max(len(s), 1), 1),
+                         n_gaps_gt30min=int(len(gaps)),
+                         max_gap_min=round(float(gaps.max() / 60), 1) if len(gaps) else 0.0,
+                         bias_vs_forecast=bias))
+    return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------- #
 # Block grid and level recovery
 # --------------------------------------------------------------------------- #
 
@@ -1246,6 +1435,8 @@ class Report:
     phase_d: pd.DataFrame
     phase_d_summary: dict
     safety: pd.DataFrame
+    weather: pd.DataFrame
+    weather_qc: pd.DataFrame
 
 
 def run_all(data_dir: Path = DATA_DIR, verbose: bool = True) -> Report:
@@ -1257,6 +1448,8 @@ def run_all(data_dir: Path = DATA_DIR, verbose: bool = True) -> Report:
     fog = load_fog_duty(data_dir)
     say("loading sensors ...")
     sens = load_sensors(data_dir)
+    say("loading exterior weather + forecast ...")
+    wx = load_weather(data_dir)
     say("recovering per-block levels ...")
     bt = block_table(act, fog)
     say("checking phases ...")
@@ -1278,7 +1471,8 @@ def run_all(data_dir: Path = DATA_DIR, verbose: bool = True) -> Report:
                   status_codes=count_status_codes(data_dir),
                   coverage=coverage_report(bt), phase_a=pa, dynamics=dyn,
                   phase_b=pb, phase_b_summary=pbs, phase_c=pc, phase_c_summary=pcs,
-                  phase_d=pdz, phase_d_summary=pds, safety=saf)
+                  phase_d=pdz, phase_d_summary=pds, safety=saf,
+                  weather=wx, weather_qc=weather_quality(data_dir))
 
 
 # --------------------------------------------------------------------------- #
