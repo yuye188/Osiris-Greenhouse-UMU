@@ -120,6 +120,10 @@ ACTUATOR_COLS = list(INTERIOR_ACTUATORS.values())
 EXTERIOR_COLS = list(EXTERIOR_RAW.values())
 FORECAST_FEATURE_COLS = list(FORECAST_COLS.values())
 FORECAST_PREVDAY_FEATURE_COLS = list(FORECAST_PREVDAY_COLS.values())
+# Companion "stale" flag per previous_day1 variable: 1 = this hour's value is a
+# frozen forward-filled carry-over from a long forecast outage (see the note
+# above the fill logic in `build_hourly_dataset`), 0 = a genuine fetched value.
+FORECAST_PREVDAY_STALE_COLS = [f"{c}_stale" for c in FORECAST_PREVDAY_FEATURE_COLS]
 
 # First hour at which *all* climatic systems (fog, shade screens, every roof and
 # side vent) are reporting. Before this the actuator columns are mostly zero
@@ -223,25 +227,45 @@ def build_hourly_dataset(
     # --- gap handling -----------------------------------------------------
     # actuators: absent report == off
     df[ACTUATOR_COLS] = df[ACTUATOR_COLS].fillna(0.0)
-    # continuous interior + exterior + forecast: fill short gaps by time interp
+    # continuous interior + exterior + forecast: fill short gaps forward-only.
+    # NOTE: this used to be `df[cont].interpolate(method="time", limit=...)`,
+    # but time-interpolation fills the value at time t from the *next* known
+    # observation too (t' > t) -- i.e. a future value. That is not available
+    # in a deployable/online setting, so gaps are now bridged with a plain
+    # forward-fill (uses only observations at or before t), capped at the
+    # same `interpolate_limit` hours.
     cont = CONTINUOUS_COLS + EXTERIOR_COLS + FORECAST_FEATURE_COLS + FORECAST_PREVDAY_FEATURE_COLS
-    df[cont] = df[cont].interpolate(method="time", limit=interpolate_limit)
+    df[cont] = df[cont].ffill(limit=interpolate_limit)
 
     # The `previous_day1` forecast has had at least one real multi-day outage
-    # in the archive (observed: `wind_speed_10m_previous_day1`, ~260 h in
-    # Apr-May 2026) that is far too long for `interpolate_limit` to bridge.
-    # Rather than lose those hours from every model (they would otherwise
-    # propagate into every horizon-shifted feature via
-    # `make_forecast_horizon_features` and force a big dropna), fall back to
-    # the "latest run" column for the same variable, which has no such gaps.
-    # This trades a little bit of the previous_day1 lead-time guarantee for
-    # keeping the row, only where the honest forecast is simply unavailable.
-    for prevday_col, base_col in zip(FORECAST_PREVDAY_FEATURE_COLS, FORECAST_FEATURE_COLS):
-        n_missing = df[prevday_col].isna().sum()
+    # in the archive (observed: ~260-364 h across variables, Apr-May 2026)
+    # that is far too long for `interpolate_limit` to bridge. This used to be
+    # backfilled from the "latest run" `FORECAST_FEATURE_COLS` column for the
+    # same variable -- but that column is the Previous-Runs API's
+    # most-recent-run estimate, which does NOT carry the ~1-day lead-time
+    # guarantee `previous_day1` is relied on for (see the note above
+    # `FORECAST_PREVDAY_COLS`), so falling back to it silently broke that
+    # guarantee for exactly the rows it patched.
+    #
+    # Instead we bridge the remaining gap with an UNLIMITED forward-fill of
+    # the previous_day1 column's OWN past values -- still only ever pulling
+    # from something known before hour t, so the lead-time guarantee holds;
+    # it just means "assume the last real day-ahead forecast persists" through
+    # the outage rather than dropping the hour entirely. Every hour bridged
+    # this way is flagged 1 in a companion `*_stale` column (0 = a genuine
+    # fetched value) so models can learn to trust a long-frozen forecast less;
+    # `make_forecast_horizon_features` shifts these flags per horizon exactly
+    # like the forecast values themselves, so row t also knows whether the
+    # forecast it sees for t+h was stale.
+    for prevday_col, stale_col in zip(FORECAST_PREVDAY_FEATURE_COLS, FORECAST_PREVDAY_STALE_COLS):
+        still_missing = df[prevday_col].isna()
+        n_missing = int(still_missing.sum())
+        df[stale_col] = still_missing.astype(float)
         if n_missing:
-            print(f"note: {prevday_col} still missing {n_missing}h after interpolation; "
-                  f"backfilling from {base_col}")
-            df[prevday_col] = df[prevday_col].fillna(df[base_col])
+            print(f"note: {prevday_col} still missing {n_missing}h after the short-gap fill; "
+                  f"bridging with an unlimited forward-fill of its own past values "
+                  f"(flagged in {stale_col})")
+            df[prevday_col] = df[prevday_col].ffill()
 
     if add_time_features:
         import numpy as np
@@ -316,6 +340,41 @@ def make_forecast_horizon_features(df: pd.DataFrame, horizons=(1, 6, 12),
             df[name] = df[col].shift(-h)
             new_cols.append(name)
     return new_cols
+
+
+def get_split_date(root: str = ".", active_start: str = ACTIVE_START,
+                   horizons=(1, 6, 12), test_frac: float = 0.20) -> "pd.Timestamp":
+    """Return the first timestamp of the chronological test period.
+
+    Both notebooks must agree on exactly the same train/test boundary:
+    notebook 2 (prediction) splits its modelling table 80/20 chronologically,
+    and notebook 1's clustering scaler/KMeans has to be fit *only* on rows
+    strictly before that same boundary -- otherwise the cluster label for a
+    test-period hour would depend on test-period data (through the scaler's
+    mean/std or the KMeans centroids), which is exactly the leakage the
+    clustering notebook was flagged for.
+
+    This replays the same scoping/dropna recipe notebook 2 uses to build its
+    modelling table -- scope to `active_start`, add actuator-history and
+    day-ahead forecast horizon features, then drop rows missing any required
+    input or target -- *before* cluster columns are joined in. Cluster values
+    never affect which rows survive that dropna (they are one-hot columns
+    filled with 0 where absent), so this function has no dependency on
+    `clusters.csv` and can run standalone, ahead of notebook 1 producing it.
+    """
+    df = build_hourly_dataset(root=root)
+    hist_cols = add_actuator_history(df)
+    df = df.loc[active_start:]
+    fc_hist_cols = make_forecast_horizon_features(df, horizons=horizons)
+    targets = make_targets(df, horizons=horizons)
+
+    time_feats = ["hour_sin", "hour_cos", "doy_sin", "doy_cos", "hour", "month"]
+    climate = CONTINUOUS_COLS + EXTERIOR_COLS + time_feats
+    required = climate + ACTUATOR_COLS + hist_cols + fc_hist_cols
+
+    idx = df[required].join(targets).dropna(subset=required + TARGET_COLS).index
+    cut = int(len(idx) * (1 - test_frac))
+    return idx[cut]
 
 
 if __name__ == "__main__":
