@@ -342,42 +342,86 @@ def make_forecast_horizon_features(df: pd.DataFrame, horizons=(1, 6, 12),
     return new_cols
 
 
-def get_split_date(root: str = ".", active_start: str = ACTIVE_START,
-                   horizons=(1, 6, 12), test_frac: float = 0.20) -> "pd.Timestamp":
-    """Return the first timestamp of the chronological test period.
+# Longest target horizon used anywhere (1, 6, 12 h). A row at time t has
+# targets up to t + EMBARGO_HOURS, so the last EMBARGO_HOURS rows before any
+# period boundary are dropped from the earlier period ("embargo") -- every
+# training target is then observed strictly before the next period begins.
+EMBARGO_HOURS = 12
 
-    Both notebooks must agree on exactly the same train/test boundary:
-    notebook 2 (prediction) splits its modelling table 80/20 chronologically,
-    and notebook 1's clustering scaler/KMeans has to be fit *only* on rows
-    strictly before that same boundary -- otherwise the cluster label for a
-    test-period hour would depend on test-period data (through the scaler's
-    mean/std or the KMeans centroids), which is exactly the leakage the
-    clustering notebook was flagged for.
 
-    This replays the same scoping/dropna recipe notebook 2 uses to build its
-    modelling table -- scope to `active_start`, add actuator-history and
-    day-ahead forecast horizon features, then drop rows missing any required
-    input or target -- *before* cluster columns are joined in. Cluster values
-    never affect which rows survive that dropna (they are one-hot columns
-    filled with 0 where absent), so this function has no dependency on
-    `clusters.csv` and can run standalone, ahead of notebook 1 producing it.
+def modelling_index(root: str = ".", active_start: str = ACTIVE_START,
+                    horizons=(1, 6, 12)) -> "pd.DatetimeIndex":
+    """Row set of notebook 2's modelling table (before cluster columns).
+
+    Replays notebook 2's scoping/dropna recipe exactly: scope to
+    `active_start`, add actuator-history, day-ahead forecast AND oracle
+    (observed future exterior weather) horizon features, then drop rows
+    missing any required input or target. Cluster values never affect which
+    rows survive (their one-hot columns are filled with 0 where absent), so
+    this has no dependency on `clusters.csv` and can run before notebook 1.
     """
     df = build_hourly_dataset(root=root)
     hist_cols = add_actuator_history(df)
     df = df.loc[active_start:]
     fc_hist_cols = make_forecast_horizon_features(df, horizons=horizons)
+    oracle_hist_cols = make_forecast_horizon_features(df, horizons=horizons, source_cols=EXTERIOR_COLS)
     targets = make_targets(df, horizons=horizons)
 
     time_feats = ["hour_sin", "hour_cos", "doy_sin", "doy_cos", "hour", "month"]
     climate = CONTINUOUS_COLS + EXTERIOR_COLS + time_feats
-    required = climate + ACTUATOR_COLS + hist_cols + fc_hist_cols
+    required = climate + ACTUATOR_COLS + hist_cols + fc_hist_cols + oracle_hist_cols
+    return df[required].join(targets).dropna(subset=required + TARGET_COLS).index
 
-    idx = df[required].join(targets).dropna(subset=required + TARGET_COLS).index
-    cut = int(len(idx) * (1 - test_frac))
-    return idx[cut]
+
+def get_splits(root: str = ".", active_start: str = ACTIVE_START, horizons=(1, 6, 12),
+               test_frac: float = 0.20, val_frac: float = 0.15,
+               embargo_hours: int = EMBARGO_HOURS) -> dict:
+    """Single source of truth for the chronological train / validation / test
+    boundaries, shared by notebook 1 (clustering) and notebook 2 (prediction).
+
+    Layout on the time axis (all "end" values are EXCLUSIVE):
+
+        [ inner train ][embargo][ validation ][embargo][ test ]
+        ^            ^          ^            ^         ^
+        start   inner_train_end val_start  train_end  test_start
+
+    * test        = last `test_frac` of the modelling rows, t >= test_start.
+    * outer train = t < train_end = test_start - embargo (used for the FINAL
+      refit that is scored on test).
+    * validation  = last `val_frac` of the outer-train rows,
+      val_start <= t < train_end (used for model/hyper-parameter selection).
+    * inner train = t < inner_train_end = val_start - embargo (used to fit
+      every candidate during selection; scalers and the selection clustering
+      are also fit on this portion only).
+
+    Because every target is at most `embargo_hours` ahead, no training target
+    (inner or outer) ever falls inside the period that follows it.
+    """
+    idx = modelling_index(root=root, active_start=active_start, horizons=horizons)
+    emb = pd.Timedelta(hours=embargo_hours)
+    test_start = idx[int(len(idx) * (1 - test_frac))]
+    train_end = test_start - emb
+    outer = idx[idx < train_end]
+    val_start = outer[int(len(outer) * (1 - val_frac))]
+    inner_train_end = val_start - emb
+    return {
+        "inner_train_end": inner_train_end,
+        "val_start": val_start,
+        "train_end": train_end,
+        "test_start": test_start,
+        "embargo_hours": embargo_hours,
+    }
+
+
+def get_split_date(root: str = ".", active_start: str = ACTIVE_START,
+                   horizons=(1, 6, 12), test_frac: float = 0.20) -> "pd.Timestamp":
+    """Backwards-compatible wrapper: first timestamp of the test period."""
+    return get_splits(root=root, active_start=active_start, horizons=horizons,
+                      test_frac=test_frac)["test_start"]
 
 
 if __name__ == "__main__":
+    print("splits:", get_splits())
     d = build_hourly_dataset()
     print("shape:", d.shape)
     print("span:", d.index.min(), "->", d.index.max())

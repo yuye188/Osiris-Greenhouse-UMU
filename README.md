@@ -100,7 +100,8 @@ jupyter nbconvert --to notebook --execute --inplace "04.RL control.ipynb"
 
 Notebook 4 is self-contained (it does not read notebooks 1–3's outputs) but is
 compute-heavy: tabular Q-learning runs tens of thousands of one-step simulator
-predictions, so a full execute takes ~25–30 min. Notebooks 1–3 run in seconds.
+predictions, so a full execute takes ~25–30 min. Notebooks 1 and 3 run in seconds;
+notebook 2 takes hours on CPU (see section 2 below).
 
 ---
 
@@ -147,22 +148,31 @@ desired climate to the closest state.
 
 ### 2 — Forecasting
 
-Persistence baseline vs **Ridge / Random Forest / HistGradientBoosting**, multi-
-output over the 6 targets, evaluated with **MAE** and **CVRMSE** on a
-**chronological** 80/20 split (never shuffled). An **ablation ladder**
-(*no actuators → + current → + history → + cluster*) measures what each block of
-climatic-system information adds.
+Ridge / Random Forest / HistGradientBoosting and LSTM / GRU / a compact attention
+block / MLP, each in a *t only* and a *history* variant, multi-output over the 6
+targets, compared with **persistence** and **seasonal (same hour yesterday)
+persistence**. One protocol for every model:
 
-- All learned models beat naïve persistence, and the advantage **grows with the
-  horizon** (at +1 h persistence is already strong; at +6 h/+12 h the models pull
-  clearly ahead using the daily cycle and the weather forecast).
-- Single-target accuracy on the active period (from notebook 3): **temp +1 h MAE
-  ≈ 0.7 °C, +6 h ≈ 1.1 °C; humidity +1 h ≈ 2.2 %, +6 h ≈ 4.1 %.**
-- The **climatic-system** features are fully included and, once scoped and given
-  rolling history, become the most-used engineered features (~11 % of RF
-  importance). **But the ablation shows they add little forecasting accuracy** —
-  their effect is already visible in the interior sensors (redundant *for
-  forecasting*).
+- chronological **inner train → validation → test** split with a **12 h embargo**
+  at both boundaries (`get_splits()` in `greenhouse_dataset.py`, shared with
+  notebook 1); scalers and cluster labels are fit on the training portion of each
+  stage (`cluster_sel` for selection, `cluster` for the final refit);
+- one common set of anchor hours with a complete, gap-free 24 h history (windows
+  that would cross a data gap are discarded, not interpolated);
+- selection by mean CVRMSE **in original units** on the same validation dates for
+  all model families; the history length is selected from {3, 6, 12, 24} h, with
+  a full sensitivity curve in 2.7n; the winner is refit on the full outer train;
+- the main model is chosen on validation and only reported on test; neural models
+  are reported as mean ± std over 5 seeds; the main differences carry paired
+  24 h block-bootstrap 95 % CIs;
+- an ablation ladder (*no actuators → + current → + history → + cluster → +
+  day-ahead forecast*) and deployment information regimes (*snapshot /
+  historical / NWP / oracle*, with NWP and oracle on matched weather variables).
+
+Interpretation is printed from each run's numbers (importance shares, CIs) rather
+than hard-coded. Notebook 2 is compute-heavy (KerasTuner search × 4 neural
+architectures × 2 variants × 5 rungs, plus 3 regimes and 5-seed refits); set
+`GH_SMOKE=1` for a quick reduced-budget dry run.
 
 ### 3 — What-if / sensitivity ⚠️
 
