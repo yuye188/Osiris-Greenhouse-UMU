@@ -68,3 +68,7 @@ tiempo,id,valor,controlador,atributo,unidades
 2026-11-12T10:29:38.119Z,6aeb6279876549717d337e26,1.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
 2026-11-12T10:31:49Z,6aeb6279876549717d337e26,1.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
 2026-11-12T10:31:50.322Z,6aeb6279876549717d337e26,1.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
+2026-11-12T22:59:00Z,6aeb6279876549717d337e26,0.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
+2026-11-12T22:59:00.057Z,6aeb6279876549717d337e26,0.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
+2026-11-12T23:01:00Z,6aeb6279876549717d337e26,1.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
+2026-11-12T23:01:00.039Z,6aeb6279876549717d337e26,1.0,Servicio Clima, Encender Calefacción Temperatura < 17 C,
